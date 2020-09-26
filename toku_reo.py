@@ -1,9 +1,12 @@
-from attr import attrs, attrib
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 import textwrap
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
 import dateutil.parser
+import requests
+from attr import attrib, attrs
+from bs4 import BeautifulSoup
+from tqdm import tqdm
 
 BASE_URL = "http://www.tokureo.maori.nz/"
 
@@ -11,6 +14,25 @@ BASE_URL = "http://www.tokureo.maori.nz/"
 def get_page(path):
     response = requests.get(BASE_URL + path)
     return BeautifulSoup(response.content, from_encoding="utf8", features="html.parser")
+
+
+def download(url, filename, desc=None):
+    # https://stackoverflow.com/a/56796119
+    file = Path(filename)
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        size = int(r.headers["Content-Length"])
+        if file.exists() and file.stat().st_size == size:
+            print("Skipping", filename)
+            r.close()
+            return
+        with open(filename, "wb") as f:
+            pbar = tqdm(total=size, desc=desc, unit="B", unit_scale=True)
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    # filter out keep-alive new chunks
+                    f.write(chunk)
+                    pbar.update(len(chunk))
 
 
 @attrs(auto_attribs=True)
@@ -57,6 +79,22 @@ class Episode:
             """
         )
 
+    @property
+    def season_code(self):
+        return f"S{self.season_number:02d}E{self.episode_number:02d}"
+
+    @property
+    def filename(self):
+        return f"{self.season_code} - Tōku Reo - {self.title}"
+
+    def download(self, destination_folder):
+        destination_folder = Path(destination_folder)
+        destination_folder.mkdir(exist_ok=True)
+        stem = str(destination_folder / self.filename)
+        video_filename = stem + Path(urlparse(self.video_url).path).suffix
+        download(self.video_url, video_filename, desc=self.season_code)
+        Path(stem + ".nfo").write_text(self.nfo)
+
 
 @attrs(auto_attribs=True)
 class Season:
@@ -76,8 +114,10 @@ class Season:
         episode_pages = [urljoin(self.season_page, a["href"]) for a in episode_links]
         episode_numbers = [int(list(a.stripped_strings)[0]) for a in episode_links]
         episode_titles = [list(a.stripped_strings)[-1] for a in episode_links]
-        return [Episode(self.season_number, n, p, t)
-                for n, p, t in zip(episode_numbers, episode_pages, episode_titles)]
+        return [
+            Episode(self.season_number, n, p, t)
+            for n, p, t in zip(episode_numbers, episode_pages, episode_titles)
+        ]
 
 
 def get_seasons():
