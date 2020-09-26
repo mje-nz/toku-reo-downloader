@@ -2,6 +2,8 @@ from attr import attrs, attrib
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import textwrap
+import dateutil.parser
 
 BASE_URL = "http://www.tokureo.maori.nz/"
 
@@ -33,6 +35,28 @@ class Episode:
     def video_url(self):
         return self.soup.select("div.streaming a.download")[0]["href"]
 
+    @property
+    def date(self):
+        return dateutil.parser.parse(self.soup.select("span.date")[0].text.strip("- "))
+
+    @property
+    def nfo(self):
+        return textwrap.dedent(
+            f"""
+            <?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+            <episodedetails>
+                <title>{self.title}</title>
+                <plot>
+                    {self.description}
+                </plot>
+                <uniqueid type="" default="true">
+                    tokureo-s{self.season_number}e{self.episode_number}
+                </uniqueid>
+                <aired>{self.date.date().isoformat()}</aired>
+            </episodedetails>
+            """
+        )
+
 
 @attrs(auto_attribs=True)
 class Season:
@@ -61,3 +85,15 @@ def get_seasons():
     season_links = soup.select("ul.seriesPick a")
     season_pages = [a["href"] for a in season_links]
     return [Season(i + 1, page) for i, page in enumerate(season_pages)]
+
+
+def generate_tvshow_nfo():
+    return textwrap.dedent(
+        """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+        <tvshow>
+            <title>Tōku Reo</title>
+            <uniqueid type="" default="true">tokureo</uniqueid>
+        </tvshow>
+        """
+    )
